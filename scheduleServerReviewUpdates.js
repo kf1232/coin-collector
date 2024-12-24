@@ -1,11 +1,69 @@
 const { ChannelType } = require('discord.js');
 const { timers, allowedChannels } = require('./config.json');
 
-const serverMessages = new Map(); // Track messages for each server to dynamically update or delete
+const serverMessages = new Map(); // Tracks messages for each server to dynamically update or delete
 
 /**
- * Updates the "server-review" channel in the admin guild with the latest server points and channel data.
- * Only includes channels listed in `allowedChannels`.
+ * Helper function to compute points statistics for a guild.
+ * @param {Map} guildUsers - Map of user points for a guild.
+ * @returns {Object} Object containing total, max, min, average, and mean points.
+ */
+const calculatePointsStats = (guildUsers) => {
+    const pointsArray = Array.from(guildUsers.values());
+    const total = pointsArray.reduce((sum, points) => sum + points, 0);
+    const max = Math.max(...pointsArray, 0);
+    const min = Math.min(...pointsArray, 0);
+    const avg = (total / pointsArray.length || 0).toFixed(2);
+    const sortedPoints = pointsArray.sort((a, b) => a - b);
+    const mean = sortedPoints[Math.floor(pointsArray.length / 2)] || 0;
+
+    return { total, max, min, avg, mean };
+};
+
+/**
+ * Helper function to get filtered channel data for a guild.
+ * @param {Guild} guild - The guild object.
+ * @returns {string} String representation of allowed channels in the guild.
+ */
+const getFilteredChannels = (guild) => {
+    return guild.channels.cache
+        .filter(
+            (channel) =>
+                channel.type === ChannelType.GuildText && allowedChannels.includes(channel.name)
+        )
+        .map((channel) => `(${channel.id}) ${channel.name}`)
+        .join('\n') || 'No allowed channels visible';
+};
+
+/**
+ * Helper function to post or update the server review message for a guild.
+ * @param {Guild} guild - The guild object.
+ * @param {string} reviewContent - The review content to post or update.
+ * @param {TextChannel} serverReviewChannel - The channel to post or update the message in.
+ */
+const updateServerReviewMessage = async (guild, reviewContent, serverReviewChannel) => {
+    try {
+        if (serverMessages.has(guild.id)) {
+            const existingMessage = serverMessages.get(guild.id);
+
+            // Update the message if content has changed
+            if (existingMessage.content !== reviewContent) {
+                await existingMessage.edit(reviewContent);
+                console.log(`Updated server review message for guild: ${guild.name}`);
+            }
+        } else {
+            // Post a new message and store the reference
+            const newMessage = await serverReviewChannel.send(reviewContent);
+            serverMessages.set(guild.id, newMessage);
+            console.log(`Posted initial server review message for guild: ${guild.name}`);
+        }
+    } catch (error) {
+        console.error(`Error updating server review for guild: ${guild.name}`, error);
+    }
+};
+
+/**
+ * Schedules periodic updates to the "server-review" channel in the admin guild.
  * @param {Client} client - The Discord client.
  * @param {Map} userPoints - The map of user points by guild.
  * @param {Object} adminServer - Admin server configuration from config.json.
@@ -33,48 +91,15 @@ const scheduleServerReviewUpdates = async (client, userPoints, adminServer) => {
             const guild = client.guilds.cache.get(guildId);
             if (!guild) continue;
 
-            try {
-                const memberCount = guild.memberCount;
-                const totalPoints = Array.from(guildUsers.values()).reduce((sum, points) => sum + points, 0);
-                const maxPoints = Math.max(...Array.from(guildUsers.values()), 0);
-                const minPoints = Math.min(...Array.from(guildUsers.values()), 0);
-                const averagePoints = (totalPoints / guildUsers.size || 0).toFixed(2);
-                const meanPoints =
-                    Array.from(guildUsers.values())
-                        .sort((a, b) => a - b)[Math.floor(guildUsers.size / 2)] || 0;
+            const { total, max, min, avg, mean } = calculatePointsStats(guildUsers);
+            const filteredChannels = getFilteredChannels(guild);
 
-                const filteredChannels = guild.channels.cache
-                    .filter(
-                        (channel) =>
-                            channel.type === ChannelType.GuildText &&
-                            allowedChannels.includes(channel.name)
-                    )
-                    .map((channel) => `(${channel.id}) ${channel.name}`)
-                    .join('\n');
+            const reviewContent = `**${guild.name} (${guildId})**\n` +
+                `- Members: ${guild.memberCount}\n` +
+                `- Total Points: ${total}, Max: ${max}, Min: ${min}, Avg: ${avg}, Mean: ${mean}\n` +
+                `\n${filteredChannels}\n\n`;
 
-                const reviewContent = `**${guild.name} (${guildId})**\n` +
-                    `- Members: ${memberCount}\n` +
-                    `- Total Points: ${totalPoints}, Max: ${maxPoints}, Min: ${minPoints}, Avg: ${averagePoints}, Mean: ${meanPoints}\n` +
-                    `\n${filteredChannels || 'No allowed channels visible'}\n\n`;
-
-                // Check if there's an existing message for this guild
-                if (serverMessages.has(guildId)) {
-                    const existingMessage = serverMessages.get(guildId);
-
-                    // Update the message if it differs
-                    if (existingMessage.content !== reviewContent) {
-                        await existingMessage.edit(reviewContent);
-                        console.log(`Updated server review message for guild: ${guild.name}`);
-                    }
-                } else {
-                    // Post a new message and store the reference
-                    const newMessage = await serverReviewChannel.send(reviewContent);
-                    serverMessages.set(guildId, newMessage);
-                    console.log(`Posted initial server review message for guild: ${guild.name}`);
-                }
-            } catch (error) {
-                console.error(`Error updating server review for guild: ${guild.name}`, error);
-            }
+            await updateServerReviewMessage(guild, reviewContent, serverReviewChannel);
         }
 
         // Remove messages for disconnected servers
