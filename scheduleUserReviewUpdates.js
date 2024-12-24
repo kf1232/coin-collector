@@ -1,7 +1,42 @@
 const { ChannelType } = require('discord.js');
-const timers = require('./config.json').timers;
+const { timers } = require('./config.json');
 
 let lastMessage = null;
+
+/**
+ * Computes points statistics for a guild.
+ * @param {Array<number>} pointsArray - Array of user points.
+ * @returns {Object} Object containing total, max, min, average, and mean points.
+ */
+const calculatePointsStats = (pointsArray) => {
+    const total = pointsArray.reduce((sum, points) => sum + points, 0);
+    const max = Math.max(...pointsArray, 0);
+    const min = Math.min(...pointsArray, 0);
+    const avg = (total / pointsArray.length || 0).toFixed(2);
+    const sortedPoints = [...pointsArray].sort((a, b) => a - b);
+    const mean = sortedPoints[Math.floor(pointsArray.length / 2)] || 0;
+
+    return { total, max, min, avg, mean };
+};
+
+/**
+ * Formats the top users in a guild by points.
+ * @param {Map<string, number>} guildUsers - Map of user points.
+ * @param {Guild} guild - Guild object to fetch user data.
+ * @param {number} count - Number of top users to include.
+ * @returns {string} Formatted string of top users.
+ */
+const formatTopUsers = (guildUsers, guild, count = 20) => {
+    return Array.from(guildUsers.entries())
+        .sort(([, pointsA], [, pointsB]) => pointsB - pointsA) // Sort by points descending
+        .slice(0, count)
+        .map(([userId, points]) => {
+            const member = guild.members.cache.get(userId);
+            const userName = member ? member.user.username : 'Unknown User';
+            return `- (${userId.slice(-4)}) ${userName}: ${points}`;
+        })
+        .join('\n');
+};
 
 /**
  * Updates the "user-review" channel in the admin guild with the latest points data.
@@ -36,26 +71,12 @@ const scheduleUserReviewUpdates = async (client, userPoints, adminServer) => {
                 if (!guild) continue;
 
                 const pointsArray = Array.from(guildUsers.values());
-                const totalPoints = pointsArray.reduce((sum, points) => sum + points, 0);
-                const maxPoints = Math.max(...pointsArray, 0);
-                const minPoints = Math.min(...pointsArray, 0);
-                const averagePoints = (totalPoints / pointsArray.length || 0).toFixed(2);
-                const meanPoints =
-                    pointsArray.sort((a, b) => a - b)[Math.floor(pointsArray.length / 2)] || 0;
-
-                const topUsers = Array.from(guildUsers.entries())
-                    .sort(([, pointsA], [, pointsB]) => pointsB - pointsA) // Sort by points descending
-                    .slice(0, 20) // Take top 20 users
-                    .map(([userId, points]) => {
-                        const member = guild.members.cache.get(userId);
-                        const userName = member ? member.user.username : 'Unknown User';
-                        return `- (${userId.slice(-4)}) ${userName}: ${points}`;
-                    })
-                    .join('\n');
+                const { total, max, min, avg, mean } = calculatePointsStats(pointsArray);
+                const topUsers = formatTopUsers(guildUsers, guild);
 
                 reviewContent += `**${guild.name} (${guildId})**\n` +
                     `Members: ${guild.memberCount}\n` +
-                    `Max: ${maxPoints}, Min: ${minPoints}, Avg: ${averagePoints}, Mean: ${meanPoints}\n` +
+                    `Max: ${max}, Min: ${min}, Avg: ${avg}, Mean: ${mean}\n` +
                     `${topUsers}\n\n`;
             }
 
@@ -63,12 +84,16 @@ const scheduleUserReviewUpdates = async (client, userPoints, adminServer) => {
                 reviewContent = 'No data available for connected servers.';
             }
 
-            // Clear last message if exists
+            // Clear the last message if it exists
             if (lastMessage) {
-                await lastMessage.delete();
+                try {
+                    await lastMessage.delete();
+                } catch (error) {
+                    console.error('Error deleting last message:', error);
+                }
             }
 
-            // Post new message
+            // Post the new message
             lastMessage = await userReviewChannel.send(reviewContent);
             console.log('User-review channel updated successfully.');
         } catch (error) {
