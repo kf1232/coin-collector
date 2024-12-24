@@ -1,10 +1,16 @@
-const { v4: uuidv4 } = require('uuid');
 const { Client, GatewayIntentBits, ChannelType } = require('discord.js');
-const { token, adminServer, allowedChannels, files, timers } = require('./config.json');
-const persistDataModule = require('./persistData'); // Import the module
-const imageManager = require('./imageManager');
 const path = require('path');
 const fs = require('fs');
+
+const { token, adminServer, files, timers } = require('./config.json');
+
+const persistDataModule = require('./persistData'); // Import the module
+const imageManager = require('./imageManager');
+
+const scheduleUserReviewUpdates = require('./scheduleUserReviewUpdates');
+const scheduleServerReviewUpdates = require('./scheduleServerReviewUpdates');
+
+const updatePointsFactory = require('./pointsManager'); // Import the points manager
 
 // Set to track processed message IDs
 const processedMessages = new Map();
@@ -26,6 +32,106 @@ const userPointsFile = files.userPoints;
 const userPoints = new Map();
 
 const persistData = persistDataModule(userPoints, userPointsFile);
+const updatePoints = updatePointsFactory(userPoints, persistData);
+
+const cleanupOnStartup = async () => {
+    console.log('Starting cleanup process...');
+    const channelsToClear = ['coin-collectors', 'user-review', 'server-review'];
+
+    try {
+        for (const guild of client.guilds.cache.values()) {
+            for (const channelName of channelsToClear) {
+                const channel = guild.channels.cache.find(
+                    (ch) => ch.type === ChannelType.GuildText && ch.name === channelName
+                );
+
+                if (channel) {
+                    console.log(`Clearing messages in ${channelName} for guild: ${guild.name}`);
+                    await messageManager.cleanChannel(channel);
+                } else {
+                    console.log(`Channel "${channelName}" not found in guild: ${guild.name}`);
+                }
+            }
+        }
+        console.log('Cleanup completed.');
+    } catch (error) {
+        console.error('Error during cleanup:', error);
+    }
+};
+
+const scheduleCoinPost = () => {
+    const minDelay = timers.coinPostIntervalMin * 60000; // Convert to ms
+    const maxDelay = timers.coinPostIntervalMax * 60000; // Convert to ms
+
+    const postCoinMessage = async (guild) => {
+        try {
+            const coinCollectorsChannel = guild.channels.cache.find(
+                (channel) => channel.type === ChannelType.GuildText && channel.name === 'coin-collectors'
+            );
+
+            if (!coinCollectorsChannel) {
+                console.log(`No "coin-collectors" channel in ${guild.name}`);
+                return;
+            }
+
+            const message = await coinCollectorsChannel.send({
+                content: 'Coin Available - React to collect 1 coin!',
+            });
+
+            const createdAt = Date.now();
+            await message.react('🪙');
+
+            const collector = message.createReactionCollector({
+                time: 60000, // 60 seconds
+                filter: (reaction, user) => reaction.emoji.name === '🪙' && !user.bot,
+            });
+
+            collector.on('collect', async (reaction, user) => {
+                const guildId = guild.id;
+                const userId = user.id;
+
+                if (processedMessages.has(`${message.id}-${userId}`)) {
+                    console.log(`Duplicate reaction ignored for ${user.tag}`);
+                    return;
+                }
+
+                // Mark message-user combination as processed
+                processedMessages.set(`${message.id}-${userId}`);
+
+                // Update points
+                updatePoints(guildId, userId, 1, 'Coin collection');
+
+                const guildUsers = userPoints.get(guildId);
+                const userPointsTotal = guildUsers.get(userId) || 0;
+
+                const reactionTime = ((Date.now() - createdAt) / 1000).toFixed(2);
+                const updatedContent = `${user.username} collected the coin in ${reactionTime} seconds. Better luck next time, everyone! ${user.username} now has ${userPointsTotal} points.`;
+
+                await message.edit(updatedContent);
+                console.log(`Coin collected: ${updatedContent}`);
+            });
+
+            collector.on('end', () => {
+                console.log(`Collector ended for message in ${guild.name}`);
+            });
+        } catch (error) {
+            console.error(`Error in postCoinMessage: ${error.message}`);
+        }
+    };
+
+    const scheduleGuildCoinPost = (guild) => {
+        const delay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
+
+        setTimeout(async () => {
+            await postCoinMessage(guild);
+            scheduleGuildCoinPost(guild); // Recursively schedule the next post
+        }, delay);
+    };
+
+    client.guilds.cache.forEach((guild) => {
+        scheduleGuildCoinPost(guild);
+    });
+};
 
 // Schedule the toy submission review every minute
 const scheduleToyReview = () => {
@@ -207,9 +313,11 @@ const readLatestToySubmission = async () => {
 const messageManager = {
     cleanChannel: async (channel) => {
         try {
-            const messages = await channel.messages.fetch({ limit: 50 });
+            const messages = await channel.messages.fetch({ limit: 100 });
             for (const message of messages.values()) {
-                await message.delete().catch(console.error);
+                if (message.author.id === client.user.id) {
+                    await message.delete().catch(console.error);
+                }
             }
             console.log(`Cleared messages from channel: ${channel.name}`);
         } catch (error) {
@@ -234,188 +342,78 @@ const messageManager = {
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
 
+    // Perform initial cleanup
+    await cleanupOnStartup();
+
+    // Load persistent data
     persistData.load();
     await persistData.syncWithGuilds(client);
 
-    console.log('Fetching latest messages from "toy-submission" channels...');
-    scheduleToyReview(); // Schedule the review process every minute    
+    // Schedule periodic tasks
+    console.log('Scheduling periodic tasks...');
+    scheduleToyReview(); // Schedule toy reviews
+    schedulePosts(); // Schedule image posts
+    scheduleCoinPost(); // Schedule coin posts
 
-    schedulePosts(); // Start posting randomly
-
-    const adminGuild = client.guilds.cache.get(adminServer.guildId);
-
-    if (!adminGuild) {
-        console.error(`Admin guild not found: ${adminServer.guildId}`);
-        return;
-    }
-
-    const serverReviewChannel = adminGuild.channels.cache.get(adminServer.channels.serverReview);
-    const userReviewChannel = adminGuild.channels.cache.get(adminServer.channels.userReview)
-
-    if (!serverReviewChannel) {
-        console.error(`Server review channel not found: ${adminServer.channels.serverReview}`);
-        return;
-    }
-
-    if (!userReviewChannel) {
-        console.error(`User review channel not found: ${adminServer.channels.userReview}`);
-        return;
-    }
-
-    try {
-        await messageManager.cleanChannel(serverReviewChannel);
-
-        for (const [guildId, guildUsers] of userPoints) {
-            const guild = client.guilds.cache.get(guildId);
-            if (!guild) continue;
-
-            // Filter channels to only include specified ones
-            const filteredChannels = guild.channels.cache
-                .filter((channel) => channel.type === ChannelType.GuildText && allowedChannels.includes(channel.name))
-                .map((channel) =>  - `${channel.name} (${channel.id.slice(-4)})`)
-                .join('\n');
-
-            const memberCount = guild.memberCount;
-            const totalPoints = Array.from(guildUsers.values()).reduce((sum, points) => sum + points, 0);
-            const maxPoints = Math.max(...Array.from(guildUsers.values()), 0);
-            const averagePoints = (totalPoints / guildUsers.size || 0).toFixed(2);
-            const meanPoints = Array.from(guildUsers.values())
-                .sort((a, b) => a - b)[Math.floor(guildUsers.size / 2)] || 0;
-
-            // If no allowed channels found, add a default message
-            const channelSummary = filteredChannels || ' - No allowed channels found';
-
-            // Create the guild summary
-            const guildSummary = `Guild: "${guild.name}" (${guildId})\n` +
-                `- Member count: ${memberCount}\n` +
-                `- Total: ${totalPoints}, Max: ${maxPoints}, Average: ${averagePoints}, Mean: ${meanPoints}\n` +
-                `${channelSummary}`;
-
-            await messageManager.sendMessage(serverReviewChannel, guildSummary);
-            console.log(`Posted server review for guild: ${guild.name} (${guildId})`);
-        }
-    } catch (error) {
-        console.error(`Error posting server review summaries: ${error.message}`);
-    }
-    
-    try {
-        await messageManager.cleanChannel(userReviewChannel);
-    
-        for (const [guildId, guildUsers] of userPoints) {
-            const guild = client.guilds.cache.get(guildId);
-            if (!guild) continue;
-    
-            const userSummaries = [];
-            for (const [userId, points] of guildUsers) {
-                const member = guild.members.cache.get(userId);
-                const userName = member ? member.user.username : 'Unknown User';
-                userSummaries.push(`- (${userId.slice(-4)}) ${userName}: ${points}`);
-            }
-    
-            const memberCount = guild.memberCount;
-            const totalPoints = Array.from(guildUsers.values()).reduce((sum, points) => sum + points, 0);
-            const maxPoints = Math.max(...Array.from(guildUsers.values()), 0);
-            const averagePoints = (totalPoints / guildUsers.size || 0).toFixed(2);
-            const meanPoints = Array.from(guildUsers.values())
-                .sort((a, b) => a - b)[Math.floor(guildUsers.size / 2)] || 0;
-    
-            // Create the guild summary
-            const guildSummary = `Guild: "${guild.name}" (${guildId})\n` +
-                `- Member count: ${memberCount}\n` +
-                `- Total Points: ${totalPoints}, Max: ${maxPoints}, Average: ${averagePoints}, Mean: ${meanPoints}\n` +
-                `${userSummaries.join('\n')}`;
-    
-            await messageManager.sendMessage(userReviewChannel, guildSummary);
-            console.log(`Posted user review for guild: ${guild.name} (${guildId})`);
-        }
-    } catch (error) {
-        console.error(`Error posting user review summaries: ${error.message}`);
-    }
-    
-
+    // Schedule user review updates
+    scheduleUserReviewUpdates(client, userPoints, adminServer);
+    scheduleServerReviewUpdates(client, userPoints, adminServer);
 });
 
 client.on('messageReactionRemove', async (reaction, user) => {
     try {
-        // Ignore bot reactions and ensure the reaction is in a guild
-        if (user.bot || !reaction.message.guild) return;
+        if (user.bot || !reaction.message.guild) return; // Ignore bot reactions and non-guild reactions
 
         const guildId = reaction.message.guild.id;
         const userId = user.id;
-        const message = reaction.message;
 
-        // Ensure the reaction is on a "Claim prize now - X coins" message
-        if (processedMessages.has(message.id)) {
-            const cost = processedMessages.get(message.id);
+        if (reaction.message.content.includes('Coin Available')) {
+            updatePoints(guildId, userId, -1, 'Coin return'); // Refund 1 coin
+            console.log(`User ${user.tag} refunded 1 coin in guild: ${reaction.message.guild.name}`);
+        }
 
-            // Ensure the guild's user points are initialized
-            if (!userPoints.has(guildId)) userPoints.set(guildId, new Map());
-            const guildUsers = userPoints.get(guildId);
-
-            // Refund the cost to the user
-            const currentPoints = guildUsers.get(userId) || 0;
-            const newPoints = currentPoints + cost;
-            guildUsers.set(userId, newPoints);
-
-            // Save the updated points to the file
-            persistData.save();
-
-            console.log(
-                `User ${user.tag} (${userId}) removed their reaction. Refunded ${cost} points. New balance: ${newPoints} points.`
-            );
-
-            // Optionally remove the processed message ID if no further tracking is required
-            processedMessages.delete(message.id);
+        if (processedMessages.has(reaction.message.id)) {
+            const cost = processedMessages.get(reaction.message.id);
+            updatePoints(guildId, userId, cost, `Refunded prize cost of ${cost} coins`);
+            console.log(`User ${user.tag} refunded prize cost in guild: ${reaction.message.guild.name}`);
         }
     } catch (error) {
-        console.error(`Error handling reaction removal: ${error.message}`);
+        console.error(`Error handling messageReactionRemove: ${error.message}`);
     }
 });
 
-
 client.on('messageReactionAdd', async (reaction, user) => {
     try {
-        // Ignore bot reactions and ensure the reaction is in a guild
-        if (user.bot || !reaction.message.guild) return;
+        if (user.bot || !reaction.message.guild) return; // Ignore bot reactions and non-guild reactions
 
         const guildId = reaction.message.guild.id;
         const userId = user.id;
         const message = reaction.message;
 
-        // Ensure the reaction is on a "Claim prize now - X coins" message
+        if (reaction.message.content.includes('Coin Available')) {
+            //updatePoints(guildId, userId, 1, 'Coin collection');
+            console.log(`User ${user.tag} collected a coin in guild: ${reaction.message.guild.name}`);
+        }
+
         const costMatch = message.content.match(/Claim prize now - (\d+) coins/);
         if (costMatch) {
             const cost = parseInt(costMatch[1], 10);
 
-            // Check if the message has already been processed
             if (processedMessages.has(message.id)) {
                 console.log(`Message already processed: ${message.id}`);
                 return;
             }
 
-            // Mark the message as processed and store the cost
             processedMessages.set(message.id, cost);
 
-            // Ensure the guild's user points are initialized
-            if (!userPoints.has(guildId)) userPoints.set(guildId, new Map());
-            const guildUsers = userPoints.get(guildId);
-
-            // Deduct the cost from the user, allowing negative balances
-            const currentPoints = guildUsers.get(userId) || 0;
-            const newPoints = currentPoints - cost;
-            guildUsers.set(userId, newPoints);
-
-            // Save the updated points to the file
-            persistData.save();
-
-            console.log(
-                `User ${user.tag} (${userId}) claimed the prize for ${cost} points. New balance: ${newPoints} points.`
-            );
+            updatePoints(guildId, userId, -cost, `Claimed prize for ${cost} coins`);
+            console.log(`User ${user.tag} claimed a prize in guild: ${reaction.message.guild.name}`);
         }
     } catch (error) {
-        console.error(`Error handling reaction: ${error.message}`);
+        console.error(`Error handling messageReactionAdd: ${error.message}`);
     }
 });
+
 
 
 client.login(token);
