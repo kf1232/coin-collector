@@ -4,9 +4,22 @@ const { imageHistory } = require('./config.json');
 const { v4: uuidv4 } = require('uuid');
 
 /**
+ * Logs and reacts to a message for success or failure.
+ * @param {Object} message - The Discord message object (used for reactions).
+ * @param {string} reaction - The reaction emoji to add to the message.
+ * @param {string} logMessage - The message to log.
+ */
+const handleReaction = async (message, reaction, logMessage) => {
+    console.log(logMessage);
+    if (message && message.react) {
+        await message.react(reaction);
+    }
+};
+
+/**
  * Downloads an image from the given URL and saves it to the specified file path.
  * @param {string} url - The URL of the image to download.
- * @param {string} filepath - The file path where the image should be saved.
+ * @param {string} filepath - The directory where the image should be saved.
  * @param {Object} message - The Discord message object (used for reactions).
  */
 const downloadImage = async (url, filepath, message) => {
@@ -15,29 +28,27 @@ const downloadImage = async (url, filepath, message) => {
         const fileExtension = path.extname(parsedUrl.pathname);
         const baseName = path.basename(parsedUrl.pathname, fileExtension);
         const uniqueFilename = `${baseName}_${Date.now()}_${uuidv4()}${fileExtension}`;
-        const uniqueFilepath = path.join(path.dirname(filepath), uniqueFilename);
+        const uniqueFilepath = path.join(filepath, uniqueFilename);
 
         console.log(`Downloading image from: ${url}`);
         console.log(`Saving image as: ${uniqueFilepath}`);
 
         if (fs.existsSync(uniqueFilepath)) {
-            console.log(`File already exists: ${uniqueFilepath}`);
-            await message.react('✅');
+            await handleReaction(message, '✅', `File already exists: ${uniqueFilepath}`);
             return;
         }
 
         const response = await fetch(url);
-        if (!response.ok) throw new Error(`Failed to fetch image: ${response.statusText}`);
+        if (!response.ok) {
+            throw new Error(`Failed to fetch image: ${response.statusText}`);
+        }
 
-        const arrayBuffer = await response.arrayBuffer();
-        const buffer = Buffer.from(arrayBuffer);
-
+        const buffer = Buffer.from(await response.arrayBuffer());
         fs.writeFileSync(uniqueFilepath, buffer);
-        console.log(`Image downloaded successfully: ${uniqueFilepath}`);
-        await message.react('✅');
+
+        await handleReaction(message, '✅', `Image downloaded successfully: ${uniqueFilepath}`);
     } catch (error) {
-        console.error(`Error downloading image from ${url}: ${error.message}`);
-        await message.react('⚠️');
+        await handleReaction(message, '⚠️', `Error downloading image from ${url}: ${error.message}`);
     }
 };
 
@@ -49,11 +60,10 @@ const downloadImage = async (url, filepath, message) => {
  * @returns {string|null} The file path of a random image, or null if none available.
  */
 const getRandomImage = (downloadsDir, recentImages) => {
-    const files = fs.readdirSync(downloadsDir).filter((file) =>
-        /\.(jpg|jpeg|png|gif|webp)$/i.test(file)
-    );
+    const allFiles = fs.readdirSync(downloadsDir);
+    const imageFiles = allFiles.filter((file) => /\.(jpg|jpeg|png|gif|webp)$/i.test(file));
+    const availableFiles = imageFiles.filter((file) => !recentImages.includes(file));
 
-    const availableFiles = files.filter((file) => !recentImages.includes(file));
     if (availableFiles.length === 0) {
         console.error('No available images to post.');
         return null;
@@ -62,6 +72,7 @@ const getRandomImage = (downloadsDir, recentImages) => {
     const randomIndex = Math.floor(Math.random() * availableFiles.length);
     const selectedImage = availableFiles[randomIndex];
 
+    // Update recent images history
     recentImages.push(selectedImage);
     if (recentImages.length > imageHistory) {
         recentImages.shift();

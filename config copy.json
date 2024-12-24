@@ -1,0 +1,31 @@
+{
+    "token": "",
+    "clientId": "",
+
+    "adminServer": {
+        "guildId": "",
+        "channels": {
+            "serverReview": "",
+            "userReview": "",
+            "pointEvent": ""
+        }
+    },
+    "allowedChannels": [
+        ""
+    ],
+    "files": {
+        "userPoints": "userPoints.json"
+    },
+    
+    "timers": {
+        "postIntervalMin": 0,
+        "postIntervalMax": 1,
+
+        "coinPostIntervalMin": 0,
+        "coinPostIntervalMax": 1,
+
+        "serverReviewUpdateTimer": 5,
+        "userReviewUpdateTimer": 5
+    },
+    "imageHistory": 10
+}
