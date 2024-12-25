@@ -1,3 +1,4 @@
+const { ChannelType } = require('discord.js');
 const { Client, GatewayIntentBits } = require('discord.js');
 const { token, adminServer, files, timers, clearChannels } = require('./config.json');
 
@@ -5,13 +6,14 @@ const path = require('path');
 const fs = require('fs');
 
 const persistDataModule = require('./persistData'); // Import the module
+const { registerCollectionCommands } = require('./collectionService');
 
 const { postRandomImage, 
         handleReactionAdd: handleImageReactionAdd, 
         handleReactionRemove: handleImageReactionRemove 
     } = require('./managerImage');
 
-const { addImage, removeImage, getRandomImage } = require('./managerCollection'); 
+const { addImage } = require('./managerCollection'); 
     
 const coinManager = require('./managerCoin');
 
@@ -20,7 +22,9 @@ const cleanupOnStartup = require('./cleanupOnStartup');
 const scheduleUserReviewUpdates = require('./scheduleUserReviewUpdates');
 const scheduleServerReviewUpdates = require('./scheduleServerReviewUpdates');
 
-const updatePointsFactory = require('./managerPoints'); // Import the points manager
+const { updatePoints, getUserBalance } = require('./managerPoints');
+
+
 
 const client = new Client({
     intents: [
@@ -40,7 +44,11 @@ const userPointsFile = files.userPoints;
 const userPoints = new Map();
 
 const persistData = persistDataModule(userPoints, userPointsFile);
-const updatePoints = updatePointsFactory(userPoints, persistData);
+
+const updatePointsFn = updatePoints(userPoints, persistData);
+const getUserBalanceFn = getUserBalance(userPoints);
+
+
 
 // Schedule the toy submission review every minute
 const scheduleToyReview = () => {
@@ -100,13 +108,13 @@ const readLatestToySubmission = async () => {
 
 // Periodic task for image posting
 const schedulePosts = () => {
-    const minDelay = timers.postIntervalMin * 60000;
-    const maxDelay = timers.postIntervalMax * 60000;
+    const minDelay = timers.toyPostIntervalMin * 60000; // Convert to ms
+    const maxDelay = timers.toyPostIntervalMax * 60000; // Convert to ms
     const delay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
 
     setTimeout(async () => {
         try {
-            await postRandomImage(client, recentImages);
+            await postRandomImage(client, recentImages, timers.messageDeleteCycle);
         } catch (error) {
             console.error('Error posting image:', error);
         }
@@ -157,7 +165,7 @@ client.on('messageReactionRemove', async (reaction, user) => {
 
         // Handle image prize reactions
         if (message.content.match(/Claim prize now - (\d+) coins/)) {
-            await handleImageReactionRemove(reaction, user, updatePoints);
+            await handleImageReactionAdd(reaction, user, updatePointsFn, getUserBalanceFn);
         }
     } catch (error) {
         console.error(`Error handling reaction remove: ${error.message}`);
@@ -173,13 +181,13 @@ client.on('messageReactionAdd', async (reaction, user) => {
 
         // Handle coin-related reactions
         if (message.content.includes('Coin Available')) {
-            await coinManager.handleReactionAdd(reaction, user, updatePoints);
+            await coinManager.handleReactionAdd(reaction, user, updatePointsFn);
             return;
         }
 
         // Handle image prize reactions
         if (message.content.match(/Claim prize now - (\d+) coins/)) {
-            await handleImageReactionAdd(reaction, user, updatePoints);
+            await handleImageReactionAdd(reaction, user, updatePointsFn, getUserBalanceFn);
         }
     } catch (error) {
         console.error(`Error handling reaction add: ${error.message}`);
@@ -189,6 +197,9 @@ client.on('messageReactionAdd', async (reaction, user) => {
 // Client ready event
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
+
+    // Register commands for collections
+    registerCollectionCommands(client);
 
     // Perform initial cleanup
     await cleanupOnStartup(client, channelsToClear, messageManager);
@@ -201,7 +212,7 @@ client.once('ready', async () => {
     console.log('Scheduling periodic tasks...');
     scheduleToyReview(); 
     schedulePosts();
-    coinManager.scheduleCoinPost(client, updatePoints, userPoints, timers);
+    coinManager.scheduleCoinPost(client, updatePointsFn, userPoints, timers);
 
     // Schedule user review updates
     scheduleUserReviewUpdates(client, userPoints, adminServer);

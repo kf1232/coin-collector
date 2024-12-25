@@ -52,6 +52,7 @@ const setupReactionCollector = (message, guild, updatePoints, userPoints) => {
 
     collector.on('collect', async (reaction, user) => {
         const guildId = guild.id;
+        const name = user.displayName;
 
         // Check if the message has already processed a reaction
         if (processedMessages.has(message.id)) {
@@ -64,12 +65,12 @@ const setupReactionCollector = (message, guild, updatePoints, userPoints) => {
 
         // Award the coin to the first user who reacts
         updatePoints(guildId, user.id, 1, 'Coin collection');
-        console.log(`User ${user.tag} collected a coin in guild: ${guild.name}`);
+        console.log(`User ${name} collected a coin in guild: ${guild.name}`);
 
         const guildUsers = userPoints.get(guildId);
         const userPointsTotal = guildUsers ? guildUsers.get(user.id) || 0 : 0;
 
-        const updatedContent = `${user.username} collected the coin. Better luck next time, everyone! ${user.username} now has ${userPointsTotal} points.`;
+        const updatedContent = `${name} collected the coin. Better luck next time, everyone! ${name} now has ${userPointsTotal} points.`;
         await message.edit(updatedContent);
     });
 

@@ -39,4 +39,29 @@ const updatePoints = (userPoints, persistData) => {
     };
 };
 
-module.exports = updatePoints;
+/**
+ * Retrieves the current balance for a user in a specific guild.
+ * @param {Map} userPoints - The map containing guild and user point data.
+ * @returns {Function} A function to get the balance for a specific user in a guild.
+ */
+const getUserBalance = (userPoints) => {
+    /**
+     * Retrieves the balance for a user in a guild.
+     * @param {string} guildId - The ID of the guild.
+     * @param {string} userId - The ID of the user.
+     * @returns {number} The current balance of the user.
+     */
+    return (guildId, userId) => {
+        if (!userPoints.has(guildId)) {
+            return 0;
+        }
+
+        const guildUsers = userPoints.get(guildId);
+        return guildUsers.get(userId) || 0;
+    };
+};
+
+module.exports = {
+    updatePoints,
+    getUserBalance,
+};
