@@ -17,18 +17,22 @@
         ""
     ],
     "files": {
-        "userPoints": "userPoints.json"
+        "userPoints": ""
     },
     
     "timers": {
-        "postIntervalMin": 0,
-        "postIntervalMax": 1,
+        "messageDeleteCycle": 5,
 
-        "coinPostIntervalMin": 0,
-        "coinPostIntervalMax": 1,
+        "toySubmissionInterval": 30,
 
-        "serverReviewUpdateTimer": 5,
-        "userReviewUpdateTimer": 5
+        "toyPostIntervalMin": 30,
+        "toyPostIntervalMax": 60,
+
+        "coinPostIntervalMin": 5,
+        "coinPostIntervalMax": 10,
+
+        "serverReviewUpdateTimer": 10,
+        "userReviewUpdateTimer": 10
     },
     "imageHistory": 10
 }
