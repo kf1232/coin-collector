@@ -1,6 +1,7 @@
 config.json
 userPoints.json
 userCollection.json
+collectionData.json
 
 node_modules/
 downloads/

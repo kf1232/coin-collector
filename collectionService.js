@@ -19,15 +19,16 @@ const loadUserCollection = () => {
 };
 
 /**
- * Sends the user's toy collection as images in the chat.
+ * Sends the user's toy collection as images in the chat, along with their coin balance.
  * @param {Message} message - The Discord message object.
  * @param {string} guildId - The guild ID.
  * @param {string} userId - The user ID.
  * @param {Object} collection - The collection data.
+ * @param {number} userBalance - The user's coin balance.
  */
-const sendUserCollectionImages = async (message, guildId, userId, collection) => {
+const sendUserCollectionImages = async (message, guildId, userId, collection, userBalance) => {
     if (!collection[guildId] || !collection[guildId][userId] || collection[guildId][userId].length === 0) {
-        return message.channel.send(`No toys found for user <@${userId}> in this guild.`);
+        return message.channel.send(`No toys found for user <@${userId}> in this guild. They have ${userBalance} coins.`);
     }
 
     const filenames = collection[guildId][userId];
@@ -37,11 +38,11 @@ const sendUserCollectionImages = async (message, guildId, userId, collection) =>
         .map((filepath) => new AttachmentBuilder(filepath));
 
     if (attachments.length === 0) {
-        return message.channel.send(`No valid images found for user <@${userId}>.`);
+        return message.channel.send(`No valid images found for user <@${userId}>. They have ${userBalance} coins.`);
     }
 
     await message.channel.send({
-        content: `**Toy Collection for <@${userId}>**`,
+        content: `**<@${userId}> has ${userBalance} coins and these toys in their collection:**`,
         files: attachments,
     });
 };
@@ -49,27 +50,37 @@ const sendUserCollectionImages = async (message, guildId, userId, collection) =>
 /**
  * Handles the `!showCollection` command to display a user's toy collection.
  * @param {Message} message - The Discord message object.
+ * @param {Function} getUserBalanceFn - Function to retrieve user's coin balance.
  */
-const handleShowCollectionCommand = async (message) => {
+const handleShowCollectionCommand = async (message, getUserBalanceFn) => {
     const collection = loadUserCollection();
     const guildId = message.guild.id;
     const userId = message.author.id;
 
-    await sendUserCollectionImages(message, guildId, userId, collection);
+    try {
+        const userBalance = getUserBalanceFn(guildId, userId); // Fetch user's coin balance
+        await sendUserCollectionImages(message, guildId, userId, collection, userBalance);
+        // Delete the original command message
+        await message.delete();
+        console.log(`Deleted command message from ${message.author.tag}`);
+    } catch (error) {
+        console.error(`Error handling showCollection command: ${error.message}`);
+    }
 };
+
 
 
 /**
  * Registers the `!showCollection` command handler with the bot.
  * @param {Client} client - The Discord client instance.
  */
-const registerCollectionCommands = (client) => {
+const registerCollectionCommands = (client, getUserBalanceFn) => {
     client.on('messageCreate', (message) => {
         if (message.author.bot) return;
 
         const content = message.content.trim();
         if (content.startsWith('!showCollection')) {
-            handleShowCollectionCommand(message);
+            handleShowCollectionCommand(message, getUserBalanceFn);
         }
     });
 };

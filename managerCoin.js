@@ -1,6 +1,20 @@
 const { ChannelType } = require('discord.js');
+const { timers } = require('./config.json');
 
-const processedMessages = new Set();
+
+const processedMessages = new Map();
+
+const cleanupProcessedMessages = (interval = timers.ONE_MINUTE) => {
+    setInterval(() => {
+        const now = Date.now();
+        for (const [key, timestamp] of processedMessages.entries()) {
+            if (now - timestamp > 60 * timers.ONE_MINUTE * 10) {
+                processedMessages.delete(key);
+            }
+        }
+        console.log('Processed messages cleaned up.');
+    }, interval);
+};
 
 /**
  * Posts a coin message in the "coin-collectors" channel.
@@ -10,8 +24,11 @@ const processedMessages = new Set();
  */
 const postCoinMessage = async (guild, updatePoints, userPoints) => {
     try {
+        const allowedChannelNames = ["coin-collectors", "treasure-island"];
+
         const coinCollectorsChannel = guild.channels.cache.find(
-            (channel) => channel.type === ChannelType.GuildText && channel.name === 'coin-collectors'
+            (channel) =>
+                channel.type === ChannelType.GuildText && allowedChannelNames.includes(channel.name)
         );
 
         if (!coinCollectorsChannel) {
@@ -45,32 +62,46 @@ const postCoinMessage = async (guild, updatePoints, userPoints) => {
  * @returns {ReactionCollector} The created reaction collector.
  */
 const setupReactionCollector = (message, guild, updatePoints, userPoints) => {
+    const debounceInterval = 5000; // 5 seconds
+
     const collector = message.createReactionCollector({
-        time: 60000, // 60 seconds
+        time: timers.ONE_MINUTE * 10,
         filter: (reaction, user) => reaction.emoji.name === '🪙' && !user.bot,
     });
 
     collector.on('collect', async (reaction, user) => {
-        const guildId = guild.id;
-        const name = user.displayName;
-
-        // Check if the message has already processed a reaction
-        if (processedMessages.has(message.id)) {
-            console.log(`Coin already collected for message ${message.id} in guild: ${guild.name}`);
+        // Ensure the message content matches the original coin message
+        if (message.content !== 'Coin Available - React to collect 1 coin!') {
+            console.log(`Invalid message content for reaction by user ${user.username}`);
             return;
         }
 
-        // Mark this message as processed
-        processedMessages.add(message.id);
+        const guildId = guild.id;
+        const userId = user.id;
 
-        // Award the coin to the first user who reacts
-        updatePoints(guildId, user.id, 1, 'Coin collection');
-        console.log(`User ${name} collected a coin in guild: ${guild.name}`);
+        // Generate a unique key for the user-message pair
+        const userMessageKey = `${message.id}-${userId}`;
+
+        // Check debounce and process reaction
+        const now = Date.now();
+        const lastProcessed = processedMessages.get(userMessageKey);
+
+        if (lastProcessed && now - lastProcessed < debounceInterval) {
+            console.log(`Debounced reaction for user ${user.username} on message ${message.id}`);
+            return;
+        }
+
+        // Mark as processed with the current timestamp
+        processedMessages.set(userMessageKey, now);
+
+        // Award the coin
+        updatePoints(guildId, userId, 1, 'Coin collection');
+        console.log(`User ${user.username} collected a coin in guild: ${guild.name}`);
 
         const guildUsers = userPoints.get(guildId);
-        const userPointsTotal = guildUsers ? guildUsers.get(user.id) || 0 : 0;
+        const userPointsTotal = guildUsers ? guildUsers.get(userId) || 0 : 0;
 
-        const updatedContent = `${name} collected the coin. Better luck next time, everyone! ${name} now has ${userPointsTotal} points.`;
+        const updatedContent = `${user.username} collected the coin. Better luck next time, everyone! ${user.username} now has ${userPointsTotal} points.`;
         await message.edit(updatedContent);
     });
 
@@ -99,8 +130,8 @@ const safelyDeleteMessage = async (message, guildName) => {
  * @param {Object} timers - Timing configuration for coin posts.
  */
 const scheduleCoinPost = (client, updatePoints, userPoints, timers) => {
-    const minDelay = timers.coinPostIntervalMin * 60000; // Convert to ms
-    const maxDelay = timers.coinPostIntervalMax * 60000; // Convert to ms
+    const minDelay = timers.coinPostIntervalMin * timers.ONE_MINUTE;
+    const maxDelay = timers.coinPostIntervalMax * timers.ONE_MINUTE;
 
     client.guilds.cache.forEach((guild) =>
         scheduleGuildCoinPost(guild, minDelay, maxDelay, updatePoints, userPoints)
@@ -127,4 +158,5 @@ const scheduleGuildCoinPost = (guild, minDelay, maxDelay, updatePoints, userPoin
 module.exports = {
     scheduleCoinPost,
     postCoinMessage,
+    cleanupProcessedMessages
 };

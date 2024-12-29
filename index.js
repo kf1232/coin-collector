@@ -10,7 +10,7 @@ const { registerCollectionCommands } = require('./collectionService');
 
 const { postRandomImage, 
         handleReactionAdd: handleImageReactionAdd, 
-        handleReactionRemove: handleImageReactionRemove 
+        handleReactionRemove: handleImageReactionRemove
     } = require('./managerImage');
 
 const { addImage } = require('./managerCollection'); 
@@ -23,8 +23,6 @@ const scheduleUserReviewUpdates = require('./scheduleUserReviewUpdates');
 const scheduleServerReviewUpdates = require('./scheduleServerReviewUpdates');
 
 const { updatePoints, getUserBalance } = require('./managerPoints');
-
-
 
 const client = new Client({
     intents: [
@@ -55,7 +53,7 @@ const scheduleToyReview = () => {
     setInterval(async () => {
         console.log("Running toy submission review...");
         await readLatestToySubmission();
-    }, 60000); // 60 seconds
+    }, timers.ONE_MINUTE); // 60 seconds
 };
 
 const readLatestToySubmission = async () => {
@@ -108,8 +106,8 @@ const readLatestToySubmission = async () => {
 
 // Periodic task for image posting
 const schedulePosts = () => {
-    const minDelay = timers.toyPostIntervalMin * 60000; // Convert to ms
-    const maxDelay = timers.toyPostIntervalMax * 60000; // Convert to ms
+    const minDelay = timers.toyPostIntervalMin * timers.ONE_MINUTE; // Convert to ms
+    const maxDelay = timers.toyPostIntervalMax * timers.ONE_MINUTE; // Convert to ms
     const delay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
 
     setTimeout(async () => {
@@ -157,12 +155,6 @@ client.on('messageReactionRemove', async (reaction, user) => {
 
         const message = reaction.message;
 
-        // Handle coin-related reactions
-        //if (message.content.includes('Coin Available')) {
-        //    await coinManager.handleReactionRemove(reaction, user, updatePoints);
-        //    return;
-        //}
-
         // Handle image prize reactions
         if (message.content.match(/Claim prize now - (\d+) coins/)) {
             await handleImageReactionAdd(reaction, user, updatePointsFn, getUserBalanceFn);
@@ -199,7 +191,7 @@ client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
 
     // Register commands for collections
-    registerCollectionCommands(client);
+    registerCollectionCommands(client, getUserBalanceFn);
 
     // Perform initial cleanup
     await cleanupOnStartup(client, channelsToClear, messageManager);
@@ -213,6 +205,7 @@ client.once('ready', async () => {
     scheduleToyReview(); 
     schedulePosts();
     coinManager.scheduleCoinPost(client, updatePointsFn, userPoints, timers);
+    coinManager.cleanupProcessedMessages()
 
     // Schedule user review updates
     scheduleUserReviewUpdates(client, userPoints, adminServer);
