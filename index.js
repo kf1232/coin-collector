@@ -5,7 +5,7 @@ const { token, adminServer, files, timers, clearChannels } = require('./config.j
 const path = require('path');
 const fs = require('fs');
 
-const persistDataModule = require('./persistData'); // Import the module
+const persistDataModule = require('./persistData');
 const { registerCollectionCommands } = require('./collectionService');
 
 const { postRandomImage, 
@@ -34,7 +34,6 @@ const client = new Client({
     ],
 });
 
-// List to keep track of recently posted images
 const recentImages = new Set();
 const channelsToClear = clearChannels;
 
@@ -46,9 +45,6 @@ const persistData = persistDataModule(userPoints, userPointsFile);
 const updatePointsFn = updatePoints(userPoints, persistData);
 const getUserBalanceFn = getUserBalance(userPoints);
 
-
-
-// Schedule the toy submission review every minute
 const scheduleToyReview = () => {
     setInterval(async () => {
         console.log("Running toy submission review...");
@@ -104,10 +100,9 @@ const readLatestToySubmission = async () => {
     }
 };
 
-// Periodic task for image posting
 const schedulePosts = () => {
-    const minDelay = timers.toyPostIntervalMin * timers.ONE_MINUTE; // Convert to ms
-    const maxDelay = timers.toyPostIntervalMax * timers.ONE_MINUTE; // Convert to ms
+    const minDelay = timers.toyPostIntervalMin * timers.ONE_MINUTE;
+    const maxDelay = timers.toyPostIntervalMax * timers.ONE_MINUTE;
     const delay = Math.floor(Math.random() * (maxDelay - minDelay + 1)) + minDelay;
 
     setTimeout(async () => {
@@ -120,7 +115,6 @@ const schedulePosts = () => {
     }, delay);
 };
 
-// Utility for managing messages
 const messageManager = {
     cleanChannel: async (channel) => {
         try {
@@ -142,7 +136,7 @@ const messageManager = {
             for (const chunk of chunks) {
                 lastMessage = await channel.send(chunk);
             }
-            return lastMessage; // Return the last message sent
+            return lastMessage;
         } catch (error) {
             console.error(`Error sending message to ${channel.name}: ${error.message}`);
         }
@@ -164,20 +158,17 @@ client.on('messageReactionRemove', async (reaction, user) => {
     }
 });
 
-// Handle reaction addition
 client.on('messageReactionAdd', async (reaction, user) => {
     try {
         if (user.bot || !reaction.message.guild) return;
 
         const message = reaction.message;
 
-        // Handle coin-related reactions
         if (message.content.includes('Coin Available')) {
             await coinManager.handleReactionAdd(reaction, user, updatePointsFn);
             return;
         }
 
-        // Handle image prize reactions
         if (message.content.match(/Claim prize now - (\d+) coins/)) {
             await handleImageReactionAdd(reaction, user, updatePointsFn, getUserBalanceFn);
         }
@@ -186,28 +177,22 @@ client.on('messageReactionAdd', async (reaction, user) => {
     }
 });
 
-// Client ready event
 client.once('ready', async () => {
     console.log(`Logged in as ${client.user.tag}`);
 
-    // Register commands for collections
     registerCollectionCommands(client, getUserBalanceFn);
 
-    // Perform initial cleanup
     await cleanupOnStartup(client, channelsToClear, messageManager);
 
-    // Load persistent data
     persistData.load();
     await persistData.syncWithGuilds(client);
 
-    // Schedule periodic tasks
     console.log('Scheduling periodic tasks...');
     scheduleToyReview(); 
     schedulePosts();
     coinManager.scheduleCoinPost(client, updatePointsFn, userPoints, timers);
     coinManager.cleanupProcessedMessages()
 
-    // Schedule user review updates
     scheduleUserReviewUpdates(client, userPoints, adminServer);
     scheduleServerReviewUpdates(client, userPoints, adminServer);    
 });
