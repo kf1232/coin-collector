@@ -1,11 +1,14 @@
-const { ChannelType } = require('discord.js');
-const path = require('path');
+const { MessageFlags, ChannelType } = require('discord.js');
+const { timers, toyChannels, status } = require('./config.json');
 const fs = require('fs');
+const path = require('path');
 const { getRandomImage } = require('./managerCollection');
 
-const processedMessages = new Set();
+const toyLogPath = path.join(__dirname, 'toyLog.txt');
+const toyImagePath = path.join(__dirname, 'downloads');
 const USER_COLLECTION_FILE = path.join(__dirname, 'userCollection.json');
 const USER_POINTS_FILE = path.join(__dirname, 'userPoints.json');
+const processedMessages = new Set();
 
 /**
  * Loads a JSON file and parses its contents.

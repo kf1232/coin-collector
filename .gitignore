@@ -1,7 +1,19 @@
+# standard javascript
+node_modules/
+
+# media files
+downloads/
+
+# config
 config.json
+
+# log file
+logs/pointsLog.txt
+logs/toylog.txt
+downloadLog.txt
+
+
+# user data
 userPoints.json
 userCollection.json
 collectionData.json
-
-node_modules/
-downloads/
