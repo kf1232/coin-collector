@@ -154,16 +154,24 @@ const postToyMessage = async (guild, updatePoints, userPoints) => {
  * @returns {ReactionCollector} The created reaction collector.
  */
 const setupReactionCollector = (message, guild, updatePoints, userPoints) => {
-    const processedMessages = new Map();
+    const debounceReaction = new Set(); // Shared debounce for collector level
     const debounceInterval = timers.debounceInterval;
 
     const collector = message.createReactionCollector({
         time: timers.ONE_MINUTE * 60 * 24,
-        filter: (reaction, user) => reaction.emoji.name === '🪙' && !user.bot,
+        filter: (reaction, user) => 
+            reaction.emoji.name === '🪙' && 
+            !user.bot && 
+            !debounceReaction.has(`${reaction.message.id}-${user.id}`),
     });
 
     collector.on('collect', async (reaction, user) => {
         try {
+            const userMessageKey = `${reaction.message.id}-${user.id}`;
+
+            debounceReaction.add(userMessageKey); // Add to debounce
+            setTimeout(() => debounceReaction.delete(userMessageKey), debounceInterval); // Remove after interval
+
             const costMatch = message.content.match(/Claim prize now - (\d+) coins/);
             if (!costMatch) {
                 logEvent(toyLogPath, status.ERROR, `Invalid message content for reaction by user "${user.username}"`);
@@ -171,32 +179,21 @@ const setupReactionCollector = (message, guild, updatePoints, userPoints) => {
             }
 
             const cost = parseInt(costMatch[1], 10);
-            const userMessageKey = `${message.id}-${user.id}`;
-            const lastProcessed = processedMessages.get(userMessageKey);
-
-            if (lastProcessed && Date.now() - lastProcessed < debounceInterval) {
-                logEvent(status.ERROR, `Debounced reaction for user "${user.username}" on message "${message.id}"`);
-                return;
-            }
-
-            // Validate user points
             const userPointsMap = userPoints.get(guild.id) || new Map();
             const currentPoints = userPointsMap.get(user.id) || 0;
 
             if (currentPoints < cost) {
-                await message.channel.send(`${user.username} lacks enough coins to spend ${cost} (${currentPoints}).`);
+                //await message.channel.send(`${user.username} lacks enough coins to spend ${cost} (${currentPoints}).`);
                 logEvent(toyLogPath, status.WARNING, `User "${user.username}" attempted to claim without enough points.`);
                 return;
             }
 
-            processedMessages.set(userMessageKey, Date.now());
-
-            // Deduct points and update points JSON
+            // Deduct points and update
             userPointsMap.set(user.id, currentPoints - cost);
             userPoints.set(guild.id, userPointsMap);
             await saveJsonFile(Object.fromEntries([...userPoints.entries()].map(([k, v]) => [k, Object.fromEntries(v)])), USER_POINTS_FILE);
 
-            // Record claimed toy in user collection JSON
+            // Update user collection
             const userCollection = await loadJsonFile(USER_COLLECTION_FILE);
             const guildCollection = userCollection[guild.id] || {};
             const userCollectionList = guildCollection[user.id] || [];
@@ -209,20 +206,21 @@ const setupReactionCollector = (message, guild, updatePoints, userPoints) => {
                 await saveJsonFile(userCollection, USER_COLLECTION_FILE);
             }
 
-            logEvent(toyLogPath, status.SAVE, `User "${user.username}" claimed "${fileName}" for ${cost} coins in guild "${guild.name}".`);
-
             const updatedPoints = userPointsMap.get(user.id);
-            await message.edit(
-                `${user.username} claimed the toy. Balance: ${updatedPoints} points.`
-            );
-            logEvent(toyLogPath, status.POST, `Message updated with collection data by "${user.username}" in guild "${guild.name}".`);
+            await message.edit(`${user.username} claimed the toy. Balance: ${updatedPoints} points.`);
+            logEvent(toyLogPath, status.SAVE, `User "${user.username}" claimed "${fileName}" for ${cost} coins in guild "${guild.name}".`);
         } catch (error) {
             logEvent(toyLogPath, status.ERROR, `Error during reaction collection: ${error.message}`);
         }
     });
 
+    collector.on('end', () => {
+        logEvent(toyLogPath, status.END, `Reaction collector ended for message "${message.id}" in guild "${guild.name}".`);
+    });
+
     return collector;
 };
+
 
 const scheduleToyPost = (client, updatePoints, userPoints) => {
     const minDelay = timers.toyPostIntervalMin * timers.ONE_MINUTE;

@@ -1,5 +1,6 @@
 const { ChannelType } = require('discord.js');
-const { timers, allowedChannels } = require('./config.json');
+const { timers, allowedChannels, status } = require('./config.json');
+const { logEvent } = require('./logs/logging')
 
 const serverMessages = new Map(); // Tracks messages for each server to dynamically update or delete
 
@@ -49,16 +50,16 @@ const updateServerReviewMessage = async (guild, reviewContent, serverReviewChann
             // Update the message if content has changed
             if (existingMessage.content !== reviewContent) {
                 await existingMessage.edit(reviewContent);
-                console.log(`Updated server review message for guild: ${guild.name}`);
+                logEvent('SYSTEM', status.SCHEDULE, `Updated server review message for guild: ${guild.name}`)
             }
         } else {
             // Post a new message and store the reference
             const newMessage = await serverReviewChannel.send(reviewContent);
             serverMessages.set(guild.id, newMessage);
-            console.log(`Posted initial server review message for guild: ${guild.name}`);
+            logEvent('SYSTEM', status.SCHEDULE, `Posted initial server review message for guild: ${guild.name}`)
         }
     } catch (error) {
-        console.error(`Error updating server review for guild: ${guild.name}`, error);
+        logEvent('SYSTEM', status.ERROR, `Error updating server review for guild: ${guild.name} : ${error.message}`)
     }
 };
 

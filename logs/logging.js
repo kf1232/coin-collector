@@ -7,6 +7,12 @@ const fileSelector = (file) => {
 
     if (file === 'COIN')
         return path.join(__dirname, 'pointsLog.txt');
+
+    if (file === 'SYSTEM')
+        return path.join(__dirname, 'systemLog.txt');
+
+    if (file === 'DOWNLOAD')
+        return path.join(__dirname, 'downloadLog.txt');
 }
 
 const logEvent = (file, status, message) => {
