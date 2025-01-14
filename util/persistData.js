@@ -1,5 +1,14 @@
 const fs = require('fs');
+const { logEvent } = require('../logs/logging'); // Ensure the correct path to your logger.js
 
+/**
+ * User Points Persistence Module
+ * Provides methods to save, load, and synchronize user points with the guilds in the Discord client.
+ * 
+ * @param {Map} userPoints - A Map containing guild and user point data.
+ * @param {string} userPointsFile - The file path where user points data will be stored.
+ * @returns {Object} Public API with methods to save, load, and sync user points.
+ */
 module.exports = (userPoints, userPointsFile) => {
     /**
      * Saves the user points to a file.
@@ -17,20 +26,21 @@ module.exports = (userPoints, userPointsFile) => {
                 2
             );
             fs.writeFileSync(userPointsFile, serializedData);
-            console.log(`User points successfully saved to ${userPointsFile}.`);
+            logEvent('FILE', 'info', `User points successfully saved to ${userPointsFile}.`);
         } catch (error) {
-            console.error(`Error saving user points: ${error.message}`);
+            logEvent('FILE', 'error', `Error saving user points: ${error.message}`);
         }
     };
 
     /**
      * Loads the user points from a file.
+     * If the file does not exist, it creates a new file with an empty structure.
      */
     const load = () => {
         try {
             if (!fs.existsSync(userPointsFile)) {
                 fs.writeFileSync(userPointsFile, JSON.stringify({}));
-                console.log(`Created new user points file: ${userPointsFile}`);
+                logEvent('FILE', 'info', `Created new user points file: ${userPointsFile}.`);
             }
 
             const rawData = fs.readFileSync(userPointsFile, 'utf-8');
@@ -40,18 +50,20 @@ module.exports = (userPoints, userPointsFile) => {
                 for (const [guildId, users] of Object.entries(data)) {
                     userPoints.set(guildId, new Map(Object.entries(users)));
                 }
-                console.log(`User points successfully loaded from ${userPointsFile}.`);
+                logEvent('FILE', 'info', `User points successfully loaded from ${userPointsFile}.`);
             } else {
                 throw new Error('Invalid file structure.');
             }
         } catch (error) {
-            console.error(`Error loading user points: ${error.message}`);
+            logEvent('FILE', 'error', `Error loading user points: ${error.message}`);
             fs.writeFileSync(userPointsFile, JSON.stringify({}));
         }
     };
 
     /**
      * Synchronizes user points with the current guilds in the Discord client.
+     * Ensures all guild members are initialized with a default point balance if not already present.
+     * 
      * @param {Object} client - The Discord client.
      */
     const syncWithGuilds = async (client) => {
@@ -72,9 +84,9 @@ module.exports = (userPoints, userPointsFile) => {
             }
 
             save();
-            console.log('Synchronized guilds and updated user points.');
+            logEvent('FILE', 'info', 'Synchronized guilds and updated user points.');
         } catch (error) {
-            console.error(`Error synchronizing guilds: ${error.message}`);
+            logEvent('FILE', 'error', `Error synchronizing guilds: ${error.message}`);
         }
     };
 

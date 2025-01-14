@@ -1,5 +1,6 @@
 const { ChannelType } = require('discord.js');
-const { timers } = require('./config.json');
+const { timers } = require('./config/config.json');
+const { logEvent } = require('./logs/logging');
 
 let lastMessage = null;
 
@@ -47,7 +48,7 @@ const formatTopUsers = (guildUsers, guild, count = 20) => {
 const scheduleUserReviewUpdates = async (client, userPoints, adminServer) => {
     const adminGuild = client.guilds.cache.get(adminServer.guildId);
     if (!adminGuild) {
-        console.error(`Admin guild not found: ${adminServer.guildId}`);
+        logEvent('SYSTEM', 'error', `Admin guild not found: ${adminServer.guildId}`);
         return;
     }
 
@@ -56,12 +57,12 @@ const scheduleUserReviewUpdates = async (client, userPoints, adminServer) => {
     );
 
     if (!userReviewChannel) {
-        console.error('No "user-review" channel found in the admin guild.');
+        logEvent('SYSTEM', 'error', 'No "user-review" channel found in the admin guild.');
         return;
     }
 
     const postUserReview = async () => {
-        console.log('Updating user-review channel with the latest points data...');
+        logEvent('SYSTEM', 'info', 'Updating user-review channel with the latest points data...');
 
         try {
             let reviewContent = '';
@@ -84,28 +85,25 @@ const scheduleUserReviewUpdates = async (client, userPoints, adminServer) => {
                 reviewContent = 'No data available for connected servers.';
             }
 
-            // Clear the last message if it exists
             if (lastMessage) {
                 try {
                     await lastMessage.delete();
+                    logEvent('SYSTEM', 'info', 'Deleted the last user-review message.');
                 } catch (error) {
-                    console.error('Error deleting last message:', error);
+                    logEvent('SYSTEM', 'error', `Error deleting last message: ${error.message}`);
                 }
             }
 
-            // Post the new message
             lastMessage = await userReviewChannel.send(reviewContent);
-            console.log('User-review channel updated successfully.');
+            logEvent('SYSTEM', 'info', 'User-review channel updated successfully.');
         } catch (error) {
-            console.error('Error updating user-review channel:', error);
+            logEvent('SYSTEM', 'error', `Error updating user-review channel: ${error.message}`);
         }
     };
 
-    // Post an initial full review
     await postUserReview();
 
-    // Schedule periodic updates
-    const refreshInterval = timers.userReviewUpdateTimer * 60000; // Convert minutes to milliseconds
+    const refreshInterval = timers.userReviewUpdateTimer * 60000;
     setInterval(postUserReview, refreshInterval);
 };
 

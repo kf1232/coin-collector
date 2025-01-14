@@ -1,5 +1,5 @@
 const { MessageFlags, ChannelType } = require('discord.js');
-const { timers, coinChannels, status } = require('../config.json');
+const { timers, coinChannels, status } = require('../config/config.json');
 const { logEvent } = require('../logs/logging')
 
 const pointsLogPath = 'COIN';
@@ -12,33 +12,39 @@ const pointsLogPath = 'COIN';
  */
 const postCoinMessage = async (guild, updatePoints, userPoints) => {
     try {
+        // Find the appropriate channel for coin collectors
         const coinCollectorsChannel = guild.channels.cache.find(
             (channel) => channel.type === ChannelType.GuildText && coinChannels.includes(channel.name)
         );
+
         if (!coinCollectorsChannel) {
-            logEvent(pointsLogPath, status.WARNING, `No allowed channels in guild "${guild.name}"`);
+            logEvent('COIN', 'warn', `No allowed channels in guild "${guild.name}"`);
             return;
         }
 
-        const message = await coinCollectorsChannel.send({ 
+        // Post the coin message in the channel
+        const message = await coinCollectorsChannel.send({
             content: 'Coin Available - React to collect 1 coin!',
             flags: MessageFlags.SuppressNotifications
         });
-        await message.react('🪙');
-        logEvent(pointsLogPath, status.POST, `Message posted in "${guild.name}"`);
 
+        await message.react('🪙');
+        logEvent('COIN', 'info', `Message posted in "${guild.name}"`);
+
+        // Setup the reaction collector
         const collector = setupReactionCollector(message, guild, updatePoints, userPoints);
+
         collector.on('end', async () => {
-            logEvent(pointsLogPath, status.END, `Reaction collector ended in "${guild.name}"`);
+            logEvent('COIN', 'info', `Reaction collector ended in "${guild.name}"`);
             try {
                 await message.delete();
-                logEvent(pointsLogPath, status.DELETE, `Message deleted in guild "${guild.name}"`);
+                logEvent('COIN', 'info', `Message deleted in guild "${guild.name}"`);
             } catch (error) {
-                logEvent(pointsLogPath, status.ERROR, `Failed to delete message in "${guild.name}": ${error.message}`);
+                logEvent('COIN', 'error', `Failed to delete message in "${guild.name}": ${error.message}`);
             }
         });
     } catch (error) {
-        logEvent(pointsLogPath, status.ERROR, `Error in postCoinMessage: ${error.message}`);
+        logEvent('COIN', 'error', `Error in postCoinMessage: ${error.message}`);
     }
 };
 
@@ -87,7 +93,7 @@ const setupReactionCollector = (message, guild, updatePoints, userPoints) => {
             logEvent(pointsLogPath, status.ERROR, `Error during reaction collection: ${error.message}`);
         }
     });
-    
+
     return collector;
 };
 
@@ -98,6 +104,7 @@ const setupReactionCollector = (message, guild, updatePoints, userPoints) => {
  * @param {Map} userPoints - Map of user points for each guild.
  * @param {Object} timers - Timing configuration for coin posts.
  */
+
 const scheduleCoinPost = (client, updatePoints, userPoints, timers) => {
     const minDelay = timers.coinPostIntervalMin * timers.ONE_MINUTE;
     const maxDelay = timers.coinPostIntervalMax * timers.ONE_MINUTE;
@@ -108,8 +115,8 @@ const scheduleCoinPost = (client, updatePoints, userPoints, timers) => {
             const nextPostTime = new Date(Date.now() + delay);
 
             logEvent(
-                pointsLogPath, 
-                status.SCHEDULE,
+                'COIN',
+                'info',
                 `Next coin post for guild "${guild.name}" scheduled at ${nextPostTime
                     .toISOString()
                     .replace('T', ' ')
@@ -120,7 +127,7 @@ const scheduleCoinPost = (client, updatePoints, userPoints, timers) => {
                 postCoinMessage(guild, updatePoints, userPoints)
                     .then(() => scheduleNextPost())
                     .catch((error) => {
-                        logEvent(pointsLogPath, status.ERROR, `Failed to post coin message for guild "${guild.name}": ${error.message}`);
+                        logEvent('COIN', 'error', `Failed to post coin message for guild "${guild.name}": ${error.message}`);
                         scheduleNextPost();
                     });
             }, delay);
@@ -129,6 +136,7 @@ const scheduleCoinPost = (client, updatePoints, userPoints, timers) => {
         scheduleNextPost();
     });
 };
+
 
 module.exports = {
     scheduleCoinPost,
