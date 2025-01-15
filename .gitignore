@@ -8,10 +8,8 @@ downloads/
 config.json
 
 # log file
-logs/pointsLog.txt
-logs/toylog.txt
-logs/systemLog.txt
-logs/downloadLog.txt
+logs/*.txt
+logs/*.log
 
 
 # user data
