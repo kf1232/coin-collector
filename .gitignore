@@ -18,3 +18,4 @@ logs/downloadLog.txt
 userPoints.json
 userCollection.json
 collectionData.json
+whitelist.json
