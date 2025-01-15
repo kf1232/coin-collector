@@ -10,13 +10,12 @@ const IMAGE_DIRECTORY = path.join(__dirname, '../../downloads'); // Ensure this 
 
 module.exports = {
     data: new SlashCommandBuilder()
-        .setName('whitelist')
-        .setDescription('View whitelisted images')
+        .setName('hidden')
+        .setDescription('View hidden images')
         .addStringOption(option =>
             option.setName('guildid')
                 .setDescription('Guild ID')
-                .setRequired(true)
-        ),
+                .setRequired(true)),
 
     async execute(interaction) {
         try {
@@ -29,27 +28,27 @@ module.exports = {
                 whitelistData = JSON.parse(fs.readFileSync(WHITELIST_FILE));
             }
 
-            // Get whitelisted images for the specified guild
-            const guildData = whitelistData.guilds[guildId] || { whitelisted: [] };
-            const whitelistedImages = guildData.whitelisted;
+            // Get hidden images for the specified guild
+            const guildData = whitelistData.guilds[guildId] || { hidden: [] };
+            const hiddenImages = guildData.hidden;
 
-            if (whitelistedImages.length === 0) {
+            if (hiddenImages.length === 0) {
                 await interaction.reply({
-                    content: 'No whitelisted images found for this guild.',
+                    content: 'No hidden images found for this guild.',
                     ephemeral: true,
                 });
                 return;
             }
 
-            const totalPages = Math.ceil(whitelistedImages.length / ITEMS_PER_PAGE);
+            const totalPages = Math.ceil(hiddenImages.length / ITEMS_PER_PAGE);
             let currentPage = 0;
 
             const getPageContent = (page) => {
                 const startIndex = page * ITEMS_PER_PAGE;
-                const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, whitelistedImages.length);
-                const pageImages = whitelistedImages.slice(startIndex, endIndex);
+                const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, hiddenImages.length);
+                const pageImages = hiddenImages.slice(startIndex, endIndex);
 
-                let content = `**Whitelisted Images (Page ${page + 1} of ${totalPages})**\n\n`;
+                let content = `**Hidden Images (Page ${page + 1} of ${totalPages})**\n\n`;
                 pageImages.forEach((img, idx) => {
                     content += `${startIndex + idx + 1}. \`${img}\`\n`;
                 });
@@ -59,8 +58,8 @@ module.exports = {
 
             const getAttachments = (page) => {
                 const startIndex = page * ITEMS_PER_PAGE;
-                const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, whitelistedImages.length);
-                const pageImages = whitelistedImages.slice(startIndex, endIndex);
+                const endIndex = Math.min(startIndex + ITEMS_PER_PAGE, hiddenImages.length);
+                const pageImages = hiddenImages.slice(startIndex, endIndex);
 
                 return pageImages.map((img) => {
                     const filePath = path.join(IMAGE_DIRECTORY, img);
@@ -125,17 +124,17 @@ module.exports = {
 
             collector.on('end', async () => {
                 await message.edit({
-                    content: `${getPageContent(currentPage)}\n*Pagination session expired. Use /whitelist to view again.*`,
+                    content: `${getPageContent(currentPage)}\n*Pagination session expired. Use /hidden to view again.*`,
                     components: [],
                 });
             });
 
-            logEvent('SYSTEM', 'info', `Displayed whitelisted images for guild ${guildId}, starting at page 1`);
+            logEvent('SYSTEM', 'info', `Displayed hidden images for guild ${guildId}, starting at page 1`);
         } catch (error) {
-            logEvent('SYSTEM', 'error', `Error in whitelist command: ${error.message}`);
+            logEvent('SYSTEM', 'error', `Error in hidden command: ${error.message}`);
             await interaction.reply({
-                content: 'There was an error while executing this command!',
-                ephemeral: true,
+                    content: 'There was an error while executing this command!',
+                    ephemeral: true,
             });
         }
     },

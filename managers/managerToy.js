@@ -10,8 +10,9 @@ const USER_COLLECTION_FILE = path.join(__dirname, '../data/userCollection.json')
 const USER_POINTS_FILE = path.join(__dirname, '../data/userPoints.json');
 const processedMessages = new Set();
 
-const recentlyUsedToys = [];
-const MAX_RECENT_TOYS = 50;
+// Track toy usage with timestamps
+const toyUsageHistory = new Map();
+const HOURS_48 = 48 * 60 * 60 * 1000; // 48 hours in milliseconds
 
 if (!fs.existsSync(toyImagePath)) {
     fs.mkdirSync(toyImagePath, { recursive: true });
@@ -22,37 +23,57 @@ if (!fs.existsSync(toyImagePath)) {
 
 
 /**
- * Gets a random image from the specified directory that has not been used in the last 50 posts.
+ * Gets a random image from the specified directory that hasn't been used in the last 48 hours.
+ * Uses whitelisted images if available, falls back to all images if no whitelist exists.
  * @param {string} toyImagePath - Path to the directory containing toy images.
+ * @param {string} guildId - The ID of the guild requesting the image.
  * @returns {string|null} - The path to a valid random image or null if no valid image is found.
  */
-const getUniqueRandomImage = (toyImagePath) => {
-    const allImages = fs.readdirSync(toyImagePath).filter((file) => /\.(png|jpg|jpeg|gif)$/i.test(file));
-    const availableImages = allImages.filter((image) => !recentlyUsedToys.includes(image));
+const getUniqueRandomImage = (toyImagePath, guildId) => {
+    try {
+        // Get whitelisted images for the guild
+        let availableImages = whitelistManager.getWhitelistedImages(guildId);
+        let usingWhitelist = true;
 
-    if (availableImages.length === 0) {
-        logEvent('TOYS', 'warn', 'No unique toys available for posting. Resetting recently used toys.');
-        recentlyUsedToys.length = 0;
+        // If no whitelisted images, fall back to all images
+        if (availableImages.length === 0) {
+            availableImages = fs.readdirSync(toyImagePath)
+                .filter(file => /\.(png|jpg|jpeg|gif|webp)$/i.test(file));
+            usingWhitelist = false;
+            logEvent('TOYS', 'info', `No whitelist found for guild ${guildId}, using all available images`);
+        }
 
-        if (allImages.length === 0) {
-            logEvent('TOYS', 'error', 'No images found in directory for posting.');
+        // Filter out recently used toys (within 48 hours)
+        const now = Date.now();
+        availableImages = availableImages.filter(image => {
+            const lastUsed = toyUsageHistory.get(image);
+            return !lastUsed || (now - lastUsed) >= HOURS_48;
+        });
+
+        if (availableImages.length === 0) {
+            logEvent('TOYS', 'warn', `No unique toys available for posting in guild ${guildId} (${usingWhitelist ? 'whitelist' : 'all images'})`);
             return null;
         }
 
-        const randomFallback = path.join(toyImagePath, allImages[Math.floor(Math.random() * allImages.length)]);
-        logEvent('TOYS', 'info', `Fallback image selected: ${path.basename(randomFallback)}`);
-        return randomFallback;
+        const randomImage = availableImages[Math.floor(Math.random() * availableImages.length)];
+        const imagePath = path.join(toyImagePath, randomImage);
+
+        // Update usage history
+        toyUsageHistory.set(randomImage, now);
+
+        // Clean up old history entries
+        for (const [toy, timestamp] of toyUsageHistory.entries()) {
+            if (now - timestamp >= HOURS_48) {
+                toyUsageHistory.delete(toy);
+            }
+        }
+
+        logEvent('TOYS', 'info', `Selected random image: ${randomImage} for guild ${guildId} (${usingWhitelist ? 'whitelist' : 'all images'})`);
+        return imagePath;
+    } catch (error) {
+        logEvent('TOYS', 'error', `Error getting random image for guild ${guildId}: ${error.message}`);
+        return null;
     }
-
-    const randomImage = availableImages[Math.floor(Math.random() * availableImages.length)];
-    recentlyUsedToys.push(randomImage);
-
-    if (recentlyUsedToys.length > MAX_RECENT_TOYS) {
-        recentlyUsedToys.shift();
-    }
-
-    logEvent('TOYS', 'info', `Selected random image: ${randomImage}`);
-    return path.join(toyImagePath, randomImage);
 };
 
 
@@ -90,12 +111,7 @@ const loadJsonFile = async (filePath, defaultData = {}) => {
 const saveJsonFile = async (data, filePath) => {
     try {
         const tempPath = `${filePath}.tmp`;
-
-        // Write data to a temporary file
         await fs.promises.writeFile(tempPath, JSON.stringify(data, null, 2));
-        logEvent('SYSTEM', 'info', `Temporary file created: ${tempPath}`);
-
-        // Rename the temporary file to the target file
         await fs.promises.rename(tempPath, filePath);
         logEvent('SYSTEM', 'info', `File successfully updated: ${filePath}`);
     } catch (error) {
@@ -121,10 +137,10 @@ const postToyMessage = async (guild, updatePoints, userPoints) => {
             return;
         }
 
-        const randomImagePath = getUniqueRandomImage(toyImagePath);
+        const randomImagePath = getUniqueRandomImage(toyImagePath, guild.id);
 
         if (!randomImagePath) {
-            logEvent('TOYS', 'error', 'No image available for posting.');
+            logEvent('TOYS', 'error', `No image available for posting in guild "${guild.name}".`);
             return;
         }
 
@@ -159,7 +175,6 @@ const postToyMessage = async (guild, updatePoints, userPoints) => {
         logEvent('TOYS', 'error', `Error in postToyMessage: ${error.message}`);
     }
 };
-
 
 
 /**
